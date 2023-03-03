@@ -4,7 +4,9 @@ use std::net::SocketAddr;
 #[tokio::main]
 async fn main() {
     // build our application with a route
-    let app = Router::new().route("/", get(handler));
+    let app = Router::new()
+        .route("/", get(handler))
+        .route("/healthcheck", get(healthcheck));
 
     // run it
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -18,3 +20,5 @@ async fn main() {
 async fn handler() -> Html<&'static str> {
     Html("<h1>Hello, World!</h1>")
 }
+
+async fn healthcheck() {}
