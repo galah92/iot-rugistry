@@ -8,6 +8,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    depends_on:
+      - db
+      - rabbitmq
     env_file:
         # Ensure that the variables in .env match the same variables in devcontainer.json
         - .env
@@ -33,5 +36,13 @@ services:
         # Ensure that the variables in .env match the same variables in devcontainer.json
         - .env
 
-    # Add "forwardPorts": ["5432"] to **devcontainer.json** to forward PostgreSQL locally.
-    # (Adding the "ports" property to this file will not forward from a Codespace.)
+  rabbitmq:
+    image: rabbitmq:3.11-management-alpine
+    container_name: rabbitmq
+    volumes:
+      - ./rabbitmq/:/etc/rabbitmq/
+    ports:
+      - 5672:5672
+      - 15672:15672
+      - 15692:15692 # rabbitmq_prometheus
+      - 1883:1883 # rabbitmq_mqtt
