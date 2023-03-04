@@ -1,4 +1,4 @@
-use axum::{response::Html, routing::get, Router};
+use axum::{response::Html, routing::get, Router, extract::State};
 use lapin::{
     message::DeliveryResult,
     options::{BasicAckOptions, BasicConsumeOptions, QueueDeclareOptions},
@@ -69,8 +69,9 @@ async fn main() {
 
     let count = Arc::new(Mutex::new(0));
 
+    let consumer_count = count.clone();
     consumer.set_delegate(move |delivery: DeliveryResult| {
-        let count = count.clone();
+        let count = consumer_count.clone();
         async move {
             let delivery = match delivery {
                 Ok(Some(delivery)) => delivery,
@@ -95,7 +96,9 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(handler))
-        .route("/healthcheck", get(healthcheck));
+        .route("/healthcheck", get(healthcheck))
+        .route("/count", get(display_count))
+        .with_state(count.clone());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     println!("listening on {addr}");
@@ -110,3 +113,8 @@ async fn handler() -> Html<&'static str> {
 }
 
 async fn healthcheck() {}
+
+async fn display_count(State(count): State<Arc<Mutex<i32>>>) -> String {
+    let count = count.lock().unwrap();
+    format!("The count is {count}")
+}
