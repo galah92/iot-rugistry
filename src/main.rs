@@ -1,18 +1,49 @@
 use axum::{response::Html, routing::get, Router};
 use lapin::{
     message::DeliveryResult,
-    options::{BasicAckOptions, BasicConsumeOptions, BasicPublishOptions, QueueDeclareOptions},
+    options::{BasicAckOptions, BasicConsumeOptions, QueueDeclareOptions},
     types::FieldTable,
-    BasicProperties, Connection, ConnectionProperties,
+    Connection, ConnectionProperties, ConsumerDelegate,
 };
-use std::net::SocketAddr;
+use std::{
+    future::Future,
+    net::SocketAddr,
+    pin::Pin,
+    sync::{Arc, Mutex},
+};
+
+#[derive(Clone, Debug)]
+struct Subscriber {
+    count: Arc<Mutex<u32>>,
+}
+
+impl ConsumerDelegate for Subscriber {
+    fn on_new_delivery(
+        &self,
+        delivery: DeliveryResult,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        let count = self.count.clone();
+        Box::pin(async move {
+            if let Some(delivery) = delivery.unwrap() {
+                let data = std::str::from_utf8(&delivery.data).unwrap();
+                println!("{data}");
+
+                {
+                    let mut count = count.lock().unwrap();
+                    *count += 1;
+                    println!("{count}");
+                }
+
+                delivery.ack(BasicAckOptions::default()).await.unwrap();
+            }
+        })
+    }
+}
 
 #[tokio::main]
 async fn main() {
     let uri = "amqp://rabbitmq";
-    let options = ConnectionProperties::default()
-        .with_executor(tokio_executor_trait::Tokio::current())
-        .with_reactor(tokio_reactor_trait::Tokio);
+    let options = ConnectionProperties::default();
 
     let connection = Connection::connect(uri, options).await.unwrap();
     let channel = connection.create_channel().await.unwrap();
@@ -36,36 +67,31 @@ async fn main() {
         .await
         .unwrap();
 
-    consumer.set_delegate(move |delivery: DeliveryResult| async move {
-        let delivery = match delivery {
-            Ok(Some(delivery)) => delivery,
-            Ok(None) => return,
-            Err(error) => {
-                dbg!("Failed to consume queue message {}", error);
-                return;
+    let count = Arc::new(Mutex::new(0));
+
+    consumer.set_delegate(move |delivery: DeliveryResult| {
+        let count = count.clone();
+        async move {
+            let delivery = match delivery {
+                Ok(Some(delivery)) => delivery,
+                Ok(None) => return,
+                Err(error) => {
+                    dbg!("Failed to consume queue message {}", error);
+                    return;
+                }
+            };
+
+            let data = std::str::from_utf8(&delivery.data).unwrap();
+            println!("{data:?}");
+
+            {
+                let mut count = count.lock().unwrap();
+                *count += 1;
             }
-        };
 
-        println!("{:#?}", delivery.data);
-
-        delivery
-            .ack(BasicAckOptions::default())
-            .await
-            .expect("Failed to ack send_webhook_event message");
+            delivery.ack(BasicAckOptions::default()).await.unwrap();
+        }
     });
-
-    channel
-        .basic_publish(
-            "",
-            "queue_test",
-            BasicPublishOptions::default(),
-            b"Hello world!",
-            BasicProperties::default(),
-        )
-        .await
-        .unwrap()
-        .await
-        .unwrap();
 
     let app = Router::new()
         .route("/", get(handler))
