@@ -1,4 +1,4 @@
-use axum::{response::Html, routing::get, Router, extract::State};
+use axum::{extract::State, response::Html, routing::get, Router};
 use lapin::{
     message::DeliveryResult,
     options::{BasicAckOptions, BasicConsumeOptions, QueueDeclareOptions},
