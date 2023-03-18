@@ -1,96 +1,24 @@
 use axum::{extract::State, response::Html, routing::get, Router};
-use lapin::{
-    message::DeliveryResult,
-    options::{BasicAckOptions, BasicConsumeOptions, QueueDeclareOptions},
-    types::FieldTable,
-    Connection, ConnectionProperties, ConsumerDelegate,
-};
 use std::{
-    future::Future,
     net::SocketAddr,
-    pin::Pin,
     sync::{Arc, Mutex},
 };
-
-#[derive(Clone, Debug)]
-struct Subscriber {
-    count: Arc<Mutex<u32>>,
-}
-
-impl ConsumerDelegate for Subscriber {
-    fn on_new_delivery(
-        &self,
-        delivery: DeliveryResult,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        let count = self.count.clone();
-        Box::pin(async move {
-            if let Some(delivery) = delivery.unwrap() {
-                let data = std::str::from_utf8(&delivery.data).unwrap();
-                println!("{data}");
-
-                {
-                    let mut count = count.lock().unwrap();
-                    *count += 1;
-                    println!("{count}");
-                }
-
-                delivery.ack(BasicAckOptions::default()).await.unwrap();
-            }
-        })
-    }
-}
+use tokio_stream::StreamExt;
+use yamq::Broker;
 
 #[tokio::main]
 async fn main() {
-    let uri = "amqp://rabbitmq";
-    let options = ConnectionProperties::default();
-
-    let connection = Connection::connect(uri, options).await.unwrap();
-    let channel = connection.create_channel().await.unwrap();
-
-    let _queue = channel
-        .queue_declare(
-            "queue_test",
-            QueueDeclareOptions::default(),
-            FieldTable::default(),
-        )
-        .await
-        .unwrap();
-
-    let consumer = channel
-        .basic_consume(
-            "queue_test",
-            "tag_foo",
-            BasicConsumeOptions::default(),
-            FieldTable::default(),
-        )
-        .await
-        .unwrap();
+    let broker = Broker::bind("127.0.0.1:1883").await;
+    let mut subcriber = broker.subscription("#").await.unwrap();
 
     let count = Arc::new(Mutex::new(0));
 
-    let consumer_count = count.clone();
-    consumer.set_delegate(move |delivery: DeliveryResult| {
-        let count = consumer_count.clone();
-        async move {
-            let delivery = match delivery {
-                Ok(Some(delivery)) => delivery,
-                Ok(None) => return,
-                Err(error) => {
-                    dbg!("Failed to consume queue message {}", error);
-                    return;
-                }
-            };
-
-            let data = std::str::from_utf8(&delivery.data).unwrap();
-            println!("{data:?}");
-
-            {
-                let mut count = count.lock().unwrap();
-                *count += 1;
-            }
-
-            delivery.ack(BasicAckOptions::default()).await.unwrap();
+    let subscriber_count = count.clone();
+    tokio::spawn(async move {
+        loop {
+            let _message = subcriber.next().await;
+            let mut count = subscriber_count.lock().unwrap();
+            *count += 1;
         }
     });
 
