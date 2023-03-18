@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum = "0.6.10"
+bytes = "1.4.0"
 tokio = { version = "1.26.0", features = ["macros", "rt", "rt-multi-thread"] }
 tokio-stream = "0.1.12"
 yamq = "0.1.0"
